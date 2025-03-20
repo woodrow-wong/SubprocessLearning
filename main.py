@@ -134,7 +134,7 @@ def execute_command(cmd, working_dir=None, shell=False):
     print(f"命令执行完成，退出码: {return_code}")
     return return_code
 
-    # 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
+    # # 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
     # process = subprocess.Popen(
     #     cmd,
     #     cwd=working_dir,
@@ -143,85 +143,44 @@ def execute_command(cmd, working_dir=None, shell=False):
     #     text=True,
     #     shell=shell
     # )
-    # 
+    
     # for line in process.stdout:
     #     logger.info(line.strip())
-    # 
+    
     # return process.wait()
 
 def main():
     print("Hello from subprocess-learning!")
     print("=" * 50)
     
-    # print("\n示例1: 基本命令执行")
-    # print("-" * 30)
-    # # 基本的echo命令
-    # exe# 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
-    # process = subprocess.Popen(
-    #     cmd,
-    #     cwd=working_dir,
-    #     stdout=subprocess.PIPE,
-    #     stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
-    #     text=True,
-    #     shell=shell
-    # )
-    # 
-    # for line in process.stdout:
-    #     logger.info(line.strip())
-    # 
-    # return process.wait()
-
-execute_command("echo 这是一个基本的测试命令", shell=True)
+    print("\n示例1: 基本命令执行")
+    print("-" * 30)
+    # 基本的echo命令
+    execute_command("echo 这是一个基本的测试命令", shell=True)
     
-    # print("\n示例2: 运行系统命令查看信息")
-    # print("-" * 30)
-
-
-    # # exe# 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
-    # process = subprocess.Popen(
-    #     cmd,
-    #     cwd=working_dir,
-    #     stdout=subprocess.PIPE,
-    #     stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
-    #     text=True,
-    #     shell=shell
-    # )
-    # 
-    # for line in process.stdout:
-    #     logger.info(line.strip())
-    # 
-    # return process.wait()
-
+    print("\n示例2: Ping测试 - 观察持续输出")
+    print("-" * 30)
+    # 根据不同操作系统使用不同的ping参数
+    if platform.system() == "Windows":
+        # Windows下ping 5次谷歌DNS服务器
+        execute_command("ping -n 5 8.8.8.8", shell=True)
+    else:
+        # Linux/Mac下ping 5次谷歌DNS服务器
+        execute_command("ping -c 5 8.8.8.8", shell=True)
     
-    # print("\n示例5: 执行目录列表命令")
-    # print("-" * 30)
-    # # 列出当前目录文件
-    # if platform.system() == "Windows":
-    #     execute_command("dir", shell=True)
-    # else:
-    #     execute_command("ls -la", shell=True)
+    print("\n示例3: 错误输出测试")
+    print("-" * 30)
+    # 执行不存在的命令，会产生错误输出
+    execute_command("non_existent_command --invalid-option", shell=True)
     
-    # print("\n示例6: 使用错误的命令")
-    # print("-" * 30)
-    # # 执行一个不存在的命令，观察错误处理
-    # execute_command("non_existent_command", shell=True)
+    # 尝试访问一个不存在的文件/目录
+    if platform.system() == "Windows":
+        execute_command("type 不存在的文件.txt", shell=True)
+    else:
+        execute_command("cat 不存在的文件.txt", shell=True)
     
-    # print("\n示例7: 多行输出命令")
-    # print("-" * 30)
-    # # 执行产生多行输出的命令
-    # if platform.system() == "Windows":
-    #     execute_command("ipconfig /all", shell=True)
-    # else:
-    #     execute_command("ifconfig", shell=True)
-    
-    # print("\n示例8: 执行Python代码")
-    # print("-" * 30)
-    # # 使用Python执行一个简单的脚本
-    # python_cmd = 'python -c "import time; print(\'开始执行\'); time.sleep(1); print(\'执行中...\'); time.sleep(1); print(\'执行结束\')"'
-    # execute_command(python_cmd, shell=True)
-
-    # print("\n所有示例执行完毕!")
-
+    # 其他原有示例可以在这里取消注释使用
+    # ...
 
 if __name__ == "__main__":
     main()
