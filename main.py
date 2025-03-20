@@ -1,6 +1,9 @@
 import subprocess
 import logging
 import platform
+import selectors  # 在Unix系统上使用
+import threading  # 添加线程支持
+import sys        # 用于检测操作系统
 
 # 配置日志记录器
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -8,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def execute_command(cmd, working_dir=None, shell=False):
     """
-    执行命令并实时获取输出
+    执行命令并实时获取标准输出和错误输出
     
     参数:
     cmd: list 或 str - 要执行的命令
@@ -18,47 +21,133 @@ def execute_command(cmd, working_dir=None, shell=False):
     返回:
     int - 命令的返回码
     """
-    # 执行命令并等待完成
+    print(f"准备执行命令: {cmd}")
+    print("创建子进程并设置管道...")
+    
+    # 执行命令并建立管道
     process = subprocess.Popen(
         cmd,
         cwd=working_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        shell=shell  # 添加shell参数
+        stdout=subprocess.PIPE,  # 创建标准输出管道
+        stderr=subprocess.PIPE,  # 创建标准错误管道
+        text=True,               # 将字节流自动解码为文本
+        shell=shell
     )
-
-    # # 实时读取并记录输出
-    # while True:  # 循环确保读取所有输出
-        # 从标准输出读取一行
-    capture = process.stdout.readlines()
     
-    # # 检查是否有输出内容
-    # if output:  # 恢复条件检查，防止空行导致无限循环
-    for line in capture:
-        output = line.strip()
-        logger.info(output)
+    print(f"子进程已启动，PID: {process.pid}")
+    print("开始从管道读取输出...")
+    
+    # 判断操作系统
+    is_windows = sys.platform.startswith('win')
+    
+    if is_windows:
+        # Windows方案：使用线程分别读取stdout和stderr
+        print("\n=== 使用线程分别读取stdout和stderr（Windows平台）===")
         
-        # # 检查进程是否结束
-        # return_code = process.poll()
-        # if return_code is not None:
-        #     # 如果没有更多输出且进程已结束，跳出循环
-        #     if not output:  # 当readline()返回空且进程已结束时，退出循环
-        #         break
+        # 定义线程函数：读取流并按行处理
+        def read_stream(stream, stream_name, logger_func):
+            print(f"开始读取{stream_name}...")
+            for line in stream:
+                line = line.strip()
+                print(f"收到{stream_name} ({len(line)} 字节): {line}")
+                logger_func(line)
+            print(f"{stream_name}读取完毕")
+        
+        # 创建并启动两个线程
+        stdout_thread = threading.Thread(
+            target=read_stream, 
+            args=(process.stdout, "标准输出", logger.info)
+        )
+        stderr_thread = threading.Thread(
+            target=read_stream, 
+            args=(process.stderr, "错误输出", logger.error)
+        )
+        
+        stdout_thread.start()
+        stderr_thread.start()
+        
+        # 等待子进程结束
+        return_code = process.wait()
+        print(f"子进程已结束，返回码: {return_code}")
+        
+        # 等待读取线程结束
+        stdout_thread.join()
+        stderr_thread.join()
+        
+        print(f"命令执行完成，退出码: {return_code}")
+        return return_code
+    else:
+        # Unix方案：使用selectors同时监控stdout和stderr
+        print("\n=== 使用selectors同时监控stdout和stderr (Unix平台) ===")
+
+        # 创建selector对象
+        sel = selectors.DefaultSelector()
+
+        # 注册stdout和stderr到selector
+        sel.register(process.stdout, selectors.EVENT_READ, 'stdout')
+        sel.register(process.stderr, selectors.EVENT_READ, 'stderr')
+
+        # 循环读取输出
+        while True:
+            events = sel.select(timeout=0.1)
+            
+            for key, _ in events:
+                stream = key.fileobj
+                name = key.data
+            
+                line = stream.readline()
+                if line:
+                    line = line.strip()
+                    if name == 'stdout':
+                        print(f"收到标准输出 ({len(line)} 字节): {line}")
+                        logger.info(line)
+                    else:
+                        print(f"收到错误输出 ({len(line)} 字节): {line}")
+                        logger.error(line)
+            
+            # 检查进程是否结束
+            return_code = process.poll()
+            if return_code is not None:
+                print(f"检测到子进程已结束，返回码: {return_code}")         
+                if events:
+                    continue          
+                # 检查是否还有剩余输出
+                remaining_output = process.stdout.read()
+                if remaining_output:
+                    print(f"读取剩余标准输出 ({len(remaining_output)} 字节)")
+                    for line in remaining_output.splitlines():
+                        logger.info(line)
                 
-        #     # 读取剩余输出
-        #     for output in process.stdout.readlines():
-        #         output = output.strip()
-        #         logger.info(output)
+                remaining_error = process.stderr.read()
+                if remaining_error:
+                    print(f"读取剩余错误输出 ({len(remaining_error)} 字节)")
+                    for line in remaining_error.splitlines():
+                        logger.error(line)
+                
+            if not events and not remaining_output and not remaining_error:
+                print("没有更多输出，退出读取循环")
+                break
 
-        #     # 读取错误输出
-        #     for error in process.stderr.readlines():
-        #         error = error.strip()
-        #         logger.error(error)
+        # 关闭selector
+        sel.close()
+    
+    print(f"命令执行完成，退出码: {return_code}")
+    return return_code
 
-        #     # 记录完成信息并返回
-        #     logger.info(f"命令执行完成，返回代码: {return_code}")
-        #     return return_code
+    # 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
+    # process = subprocess.Popen(
+    #     cmd,
+    #     cwd=working_dir,
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
+    #     text=True,
+    #     shell=shell
+    # )
+    # 
+    # for line in process.stdout:
+    #     logger.info(line.strip())
+    # 
+    # return process.wait()
 
 def main():
     print("Hello from subprocess-learning!")
@@ -67,21 +156,42 @@ def main():
     # print("\n示例1: 基本命令执行")
     # print("-" * 30)
     # # 基本的echo命令
-    # execute_command("echo 这是一个基本的测试命令", shell=True)
+    # exe# 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
+    # process = subprocess.Popen(
+    #     cmd,
+    #     cwd=working_dir,
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
+    #     text=True,
+    #     shell=shell
+    # )
+    # 
+    # for line in process.stdout:
+    #     logger.info(line.strip())
+    # 
+    # return process.wait()
+
+execute_command("echo 这是一个基本的测试命令", shell=True)
     
     # print("\n示例2: 运行系统命令查看信息")
     # print("-" * 30)
-    # # 查看系统信息
-    # execute_command("systeminfo | findstr /B /C:\"OS 名称\" /C:\"OS 版本\"", shell=True)
-    
-    print("\n示例4: 持续输出命令")
-    print("-" * 30)
-    # ping命令会产生持续的输出，非常适合观察readline()的效果
-    # 这里只ping 3次，以免等待时间过长
-    if platform.system() == "Windows":
-        execute_command("ping -n 3 127.0.0.1", shell=True)
-    else:
-        execute_command("ping -c 3 127.0.0.1", shell=True)
+
+
+    # # exe# 方法2: 将错误输出重定向到标准输出 (更简单但区分不了stdout和stderr)
+    # process = subprocess.Popen(
+    #     cmd,
+    #     cwd=working_dir,
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.STDOUT,  # 将stderr重定向到stdout
+    #     text=True,
+    #     shell=shell
+    # )
+    # 
+    # for line in process.stdout:
+    #     logger.info(line.strip())
+    # 
+    # return process.wait()
+
     
     # print("\n示例5: 执行目录列表命令")
     # print("-" * 30)
